@@ -11,12 +11,12 @@ already paired:
 Lab A refers a test to Lab B. The order appears under Lab B's **Incoming Orders**, Lab B enters and
 validates the result, and the result comes back to Lab A, which accepts it.
 
-Guide: [External Referrals](https://uwdigi.atlassian.net/wiki/spaces/OG/pages/1777303565) (under External
-Integrations).
+Guide: [External Referrals (OpenELIS to OpenELIS)](https://uwdigi.atlassian.net/wiki/spaces/OG/pages/1780088834)
+(under External Integrations).
 
 Requires OpenELIS images with the referral fixes of
-[OpenELIS-Global-2 #5053](https://github.com/DIGI-UW/OpenELIS-Global-2/pull/5053): `develop` now, then the
-next release.
+[OpenELIS-Global-2 #5053](https://github.com/DIGI-UW/OpenELIS-Global-2/pull/5053) (merged): `develop` now, then
+the next release.
 
 ## Start
 
@@ -70,7 +70,7 @@ accept the browser warning.
 - A referral is a FHIR `Task` whose owner is the reference lab's facility `Organization`. Lab B picks up
   the Tasks owned by its own facility, so `org.openelisglobal.remote.source.identifier` keeps its default.
 - Pairing: Lab A must know Lab B's facility FHIR id. Lab B shows it on its own facility record (**Admin >
-  Locations & Organizations > Organizations**, *FHIR id*), and Lab A stores it on its reference lab, in the
+  Locations & Organizations > Organizations**, *This laboratory*), and Lab A stores it on its reference lab, in the
   field **FHIR id at the reference lab**. `scripts/pair.sh` (the `pair` service) does exactly that through
   the Locations API, and creates the reference lab on Lab A when it is missing. It is safe to run again:
   `docker compose run --rm pair`.
