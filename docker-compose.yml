@@ -1,0 +1,214 @@
+# Two OpenELIS Global laboratories that exchange referrals over FHIR.
+#
+#   Lab A  Kampala Central Laboratory            https://localhost:${LAB_A_HTTPS_PORT}  (sends referrals)
+#   Lab B  Uganda National Reference Laboratory  https://localhost:${LAB_B_HTTPS_PORT}  (the reference lab)
+#
+# Each lab has its own database, FHIR server and webapp on its own network. The two
+# FHIR servers are also on a shared network as fhir-a.openelis.org and
+# fhir-b.openelis.org, which is how each lab reads the other's referral Tasks.
+# The one-shot "pair" service records Lab B's FHIR id on Lab A's reference lab
+# (Admin > Locations), so referrals flow as soon as both labs are up.
+
+x-oe: &oe
+  image: itechuw/openelis-global-2:${OE_IMAGE_TAG}
+  platform: linux/amd64
+  restart: unless-stopped
+
+x-fhir: &fhir
+  image: itechuw/openelis-global-2-fhir:${OE_IMAGE_TAG}
+  platform: linux/amd64
+  restart: unless-stopped
+  environment: &fhirenv
+    JAVA_OPTS: "-Xmx512m -Djavax.net.ssl.trustStore=${SSL_TRUSTSTORE_PATH} -Djavax.net.ssl.trustStoreType=pkcs12 -Djavax.net.ssl.keyStore=${SSL_KEYSTORE_PATH} -Djavax.net.ssl.keyStoreType=pkcs12"
+    CATALINA_OPTS: "-Dhapi.ssl.truststorepath=${SSL_TRUSTSTORE_PATH} -Dhapi.ssl.keystorepath=${SSL_KEYSTORE_PATH}"
+    FHIR_DATASOURCE_URL: "jdbc:postgresql://db.openelis.org:5432/clinlims?currentSchema=clinlims"
+    FHIR_DATASOURCE_USERNAME: clinlims
+    FHIR_DATASOURCE_PASSWORD: ${OE_DB_PASSWORD}
+    SSL_KEYSTORE_PASSWORD: ${SSL_KEYSTORE_PASSWORD}
+    SSL_TRUSTSTORE_PASSWORD: ${SSL_TRUSTSTORE_PASSWORD}
+    FHIR_SERVER_ADRESS: "http://fhir.openelis.org:8080/fhir/"
+
+x-db: &db
+  image: itechuw/openelis-global-2-database:${OE_IMAGE_TAG}
+  platform: linux/amd64
+  restart: unless-stopped
+  env_file: [./configs/database/database.env]
+  environment:
+    - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    - DB_PASSWORD=${OE_DB_PASSWORD}
+    - DB_SUPERUSER_PASSWORD=${ADMIN_PASSWORD}
+  healthcheck:
+    test: ["CMD", "pg_isready", "-q", "-d", "clinlims", "-U", "clinlims"]
+    interval: 10s
+    retries: 20
+
+x-oe-env: &oeenv
+  - OE_DB_PASSWORD=${OE_DB_PASSWORD}
+  - TZ=${TZ}
+  - CATALINA_OPTS= -Xmx1000m -Ddatasource.url=jdbc:postgresql://db.openelis.org:5432/clinlims -Ddatasource.username=clinlims -Doe.ssl.truststorepath=${SSL_TRUSTSTORE_PATH} -Doe.ssl.keystorepath=${SSL_KEYSTORE_PATH}
+  - SSL_KEYSTORE_PATH
+  - SSL_KEYSTORE_PASSWORD
+  - SSL_TRUSTSTORE_PATH
+  - SSL_TRUSTSTORE_PASSWORD
+
+x-proxy: &proxy
+  image: itechuw/openelis-global-2-proxy:${OE_IMAGE_TAG}
+  platform: linux/amd64
+  restart: unless-stopped
+  command: ["/bin/sh", "-c", "envsubst '$$OE_NGINX_CERT $$OE_NGINX_KEY $$OE_HTTPS_PORT' < /etc/nginx/nginx.conf.template > /etc/nginx/nginx.conf && exec nginx -g 'daemon off;'"]
+  volumes:
+    - certs:/etc/nginx/certs/
+    - keys:/etc/nginx/keys/
+    - ./configs/nginx/nginx.conf:/etc/nginx/nginx.conf.template:ro
+
+services:
+  certs:
+    image: itechuw/openelis-global-2-certs:${OE_IMAGE_TAG}
+    platform: linux/amd64
+    restart: "no"
+    environment:
+      - KEYSTORE_PW=${SSL_KEYSTORE_PASSWORD}
+      - TRUSTSTORE_PW=${SSL_TRUSTSTORE_PASSWORD}
+    volumes:
+      - stores:/etc/openelis-global
+      - keys:/etc/ssl/private/
+      - certs:/etc/ssl/certs/
+
+  db-a:
+    <<: *db
+    volumes: [db-a:/var/lib/postgresql/data]
+    networks: {net-a: {aliases: [db.openelis.org]}}
+
+  db-b:
+    <<: *db
+    volumes: [db-b:/var/lib/postgresql/data]
+    networks: {net-b: {aliases: [db.openelis.org]}}
+
+  fhir-a:
+    <<: *fhir
+    depends_on:
+      db-a: {condition: service_healthy}
+      certs: {condition: service_completed_successfully}
+    volumes: [stores:/etc/openelis-global]
+    networks:
+      net-a: {aliases: [fhir.openelis.org]}
+      shared: {aliases: [fhir-a.openelis.org]}
+
+  fhir-b:
+    <<: *fhir
+    depends_on:
+      db-b: {condition: service_healthy}
+      certs: {condition: service_completed_successfully}
+    volumes: [stores:/etc/openelis-global]
+    networks:
+      net-b: {aliases: [fhir.openelis.org]}
+      shared: {aliases: [fhir-b.openelis.org]}
+
+  oe-a:
+    <<: *oe
+    depends_on:
+      db-a: {condition: service_healthy}
+      certs: {condition: service_completed_successfully}
+    environment: *oeenv
+    volumes:
+      - stores:/etc/openelis-global
+      - ./configs/lab-a/properties:/var/lib/openelis-global/properties
+      - logs-a:/var/lib/openelis-global/logs
+    secrets:
+      - initial-admin-password
+      - source: common-a
+        target: common.properties
+    networks:
+      net-a: {aliases: [oe.openelis.org]}
+      shared: {}
+
+  oe-b:
+    <<: *oe
+    depends_on:
+      db-b: {condition: service_healthy}
+      certs: {condition: service_completed_successfully}
+    environment: *oeenv
+    volumes:
+      - stores:/etc/openelis-global
+      - ./configs/lab-b/properties:/var/lib/openelis-global/properties
+      - logs-b:/var/lib/openelis-global/logs
+    secrets:
+      - initial-admin-password
+      - source: common-b
+        target: common.properties
+    networks:
+      net-b: {aliases: [oe.openelis.org]}
+      shared: {}
+
+  frontend:
+    image: itechuw/openelis-global-2-frontend:${OE_IMAGE_TAG}
+    platform: linux/amd64
+    restart: unless-stopped
+    networks:
+      net-a: {aliases: [frontend.openelis.org]}
+      net-b: {aliases: [frontend.openelis.org]}
+
+  proxy-a:
+    <<: *proxy
+    ports: ["${LAB_A_HTTPS_PORT}:443"]
+    environment:
+      - OE_NGINX_CERT=apache-selfsigned.crt
+      - OE_NGINX_KEY=apache-selfsigned.key
+      - OE_HTTPS_PORT=${LAB_A_HTTPS_PORT}
+    depends_on:
+      certs: {condition: service_completed_successfully}
+      oe-a: {condition: service_started}
+      frontend: {condition: service_started}
+    networks: [net-a]
+
+  proxy-b:
+    <<: *proxy
+    ports: ["${LAB_B_HTTPS_PORT}:443"]
+    environment:
+      - OE_NGINX_CERT=apache-selfsigned.crt
+      - OE_NGINX_KEY=apache-selfsigned.key
+      - OE_HTTPS_PORT=${LAB_B_HTTPS_PORT}
+    depends_on:
+      certs: {condition: service_completed_successfully}
+      oe-b: {condition: service_started}
+      frontend: {condition: service_started}
+    networks: [net-b]
+
+  pair:
+    image: curlimages/curl:8.11.1
+    restart: on-failure:3
+    entrypoint: ["/bin/sh", "/scripts/pair.sh"]
+    environment:
+      LAB_A_URL: https://oe-a:8443/api/OpenELIS-Global
+      LAB_B_URL: https://oe-b:8443/api/OpenELIS-Global
+      OE_USER: admin
+      REFERENCE_LAB_NAME: Uganda National Reference Laboratory
+      REFERENCE_LAB_SHORT_NAME: UNRL
+    volumes: [./scripts:/scripts:ro]
+    secrets: [initial-admin-password]
+    depends_on:
+      oe-a: {condition: service_started}
+      oe-b: {condition: service_started}
+    networks: [shared]
+
+secrets:
+  initial-admin-password:
+    file: ./secrets/initial-admin-password
+  common-a:
+    file: ./configs/lab-a/properties/common.properties
+  common-b:
+    file: ./configs/lab-b/properties/common.properties
+
+networks:
+  net-a: {}
+  net-b: {}
+  shared: {}
+
+volumes:
+  stores: {}
+  keys: {}
+  certs: {}
+  db-a: {}
+  db-b: {}
+  logs-a: {}
+  logs-b: {}

@@ -1,0 +1,7 @@
+*.DS_Store
+.idea/
+docker-compose.override.yml
+configs/lab-*/properties/TotalSystemConfiguration.properties
+configs/lab-*/properties/ChangedSystemConfiguration.properties
+**/*checksum*.properties
+**/*checksums*.properties
