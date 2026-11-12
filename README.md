@@ -15,7 +15,7 @@ Guide: [External Referrals](https://uwdigi.atlassian.net/wiki/spaces/OG/pages/17
 Integrations).
 
 Requires OpenELIS images with the referral fixes of
-[OpenELIS-Global-2 #5050](https://github.com/DIGI-UW/OpenELIS-Global-2/pull/5050): `develop` now, then the
+[OpenELIS-Global-2 #5053](https://github.com/DIGI-UW/OpenELIS-Global-2/pull/5053): `develop` now, then the
 next release.
 
 ## Start
