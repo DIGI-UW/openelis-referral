@@ -3,7 +3,8 @@
 #
 # Lab A addresses a referral Task to the reference lab's FHIR id, and Lab B
 # picks up the Tasks addressed to its own facility. This script reads Lab B's
-# facility FHIR id (Admin > Locations on Lab B) and records it on Lab A's
+# facility FHIR id ("This laboratory" at the top of Admin > Locations &
+# Organizations > Organizations on Lab B) and records it on Lab A's
 # reference lab (Admin > Locations on Lab A, "FHIR id at the reference lab"),
 # creating that reference lab when it does not exist yet. It is safe to run
 # again: a reference lab that already carries the id is left alone.
@@ -64,11 +65,10 @@ row_id() {
 wait_and_login b "$LAB_B_URL"
 wait_and_login a "$LAB_A_URL"
 
-lab_b_name=$(call b "$LAB_B_URL" GET /rest/configuration-properties | field siteName || true)
-facility_id=$(call b "$LAB_B_URL" GET "/rest/locations/organizations?status=all&pageSize=100" | row_id FACILITY_ORG)
-[ -n "$facility_id" ] || { log "Lab B has no facility organization yet"; exit 1; }
-lab_b_fhir_id=$(call b "$LAB_B_URL" GET "/rest/locations/organizations/$facility_id" | field fhirId)
-[ -n "$lab_b_fhir_id" ] || { log "Lab B's facility has no FHIR id yet"; exit 1; }
+this_lab=$(call b "$LAB_B_URL" GET /rest/locations/this-laboratory)
+lab_b_name=$(printf '%s' "$this_lab" | field name)
+lab_b_fhir_id=$(printf '%s' "$this_lab" | field fhirId)
+[ -n "$lab_b_fhir_id" ] || { log "Lab B has no facility record yet"; exit 1; }
 log "Lab B ${lab_b_name:+($lab_b_name) }facility FHIR id: $lab_b_fhir_id"
 
 type_id=$(call a "$LAB_A_URL" GET /rest/locations/lists | tr '{' '\n' | grep '"referralLab"' |
